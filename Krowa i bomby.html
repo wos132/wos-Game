@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐄 Atomowa-Krowa 🧨</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #87CEEB 0%, #98D8E8 50%, #E0F7FA 100%);
+            font-family: 'Press Start 2P', monospace;
+            user-select: none;
+            overflow-x: auto;
+        }
+        .title {
+            color: #FF6B35;
+            text-shadow: 4px 4px 0px #000, 0 0 20px #FF1493;
+            margin-bottom: 5px;
+            font-size: clamp(20px, 4vw, 28px);
+            animation: glow 1.5s ease-in-out infinite alternate;
+            text-align: center;
+        }
+        @keyframes glow {
+            from { filter: hue-rotate(0deg) drop-shadow(0 0 10px #FF6B35); }
+            to { filter: hue-rotate(20deg) drop-shadow(0 0 25px #FF1493); }
+        }
+        .info {
+            color: #333;
+            font-size: clamp(10px, 2vw, 12px);
+            margin-bottom: 15px;
+            text-align: center;
+            max-width: 800px;
+            text-shadow: 1px 1px 1px #FFF;
+        }
+        #gameContainer {
+            position: relative;
+            display: inline-block;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        canvas {
+            border: 4px solid #333;
+            border-radius: 10px;
+            image-rendering: pixelated;
+            cursor: pointer;
+            display: block;
+            transition: transform 0.2s ease;
+        }
+        canvas:hover, canvas:active {
+            transform: scale(1.02);
+        }
+        .overlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90vw;
+            max-width: 650px;
+            background: linear-gradient(135deg, rgba(0,0,0,0.95), rgba(50,0,0,0.9));
+            border: 5px solid #FF6B35;
+            border-radius: 25px;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: clamp(18px, 4vw, 24px);
+            text-shadow: 3px 3px 0px #000;
+            padding: 50px 30px;
+            z-index: 1000;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+        }
+        .overlay button {
+            background: linear-gradient(135deg, #FF6B35, #FF1493);
+            border: none;
+            color: white;
+            font-family: 'Press Start 2P', monospace;
+            font-size: clamp(14px, 3vw, 16px);
+            padding: 20px 40px;
+            margin-top: 25px;
+            border-radius: 15px;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+            text-shadow: 2px 2px 0px #000;
+        }
+        .overlay button:hover {
+            transform: scale(1.1) translateY(-3px);
+            box-shadow: 0 12px 30px rgba(255,107,53,0.6);
+        }
+    </style>
+</head>
+<body>
+    <div class="title">🐄 ATOMOWA KROWA 🧨</div>
+    <div class="info">SPACE / klik w krowę = skok! Zbieraj zielone sprężyny i niebieskie jetpack</div>
+    <div id="gameContainer">
+        <canvas id="game" width="800" height="400"></canvas>
+        <div id="overlay" class="overlay">
+            <div id="gameOverText" style="font-size: clamp(24px, 6vw, 36px); margin-bottom: 25px;">💥 WYBUCH! 💥</div>
+            <div id="scoreText" style="font-size: clamp(16px, 4vw, 20px); margin-bottom: 15px;"></div>
+            <div id="highScoreText" style="font-size: clamp(12px, 3vw, 16px); margin-bottom: 25px; opacity: 0.9;"></div>
+            <button onclick="restartGame()">RESTART</button>
+            <div style="font-size: clamp(8px, 2vw, 10px); margin-top: 15px; opacity: 0.8;"></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const gameContainer = document.getElementById('gameContainer');
+
+        const WIDTH = 800;
+        const HEIGHT = 400;
+        const GROUND_Y = 340;
+        const COW_GROUND = 290;
+        const BOMB_BASE_Y = 305;
+        const FPS = 60;
+
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+
+        // Game state
+        let gameSpeed = 6;
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('cowHighScore')) || 0;
+        let frame = 0;
+        let gameOver = false;
+        let newRecord = false;
+
+        // Powerups
+        let springCount = 0;
+        let jetCount = 0;
+        let springBoostActive = false;
+        let springTimer = 0;
+        let jetpackActive = false;
+        let jetTimer = 0;
+        let jetImmunity = 0;
+
+        // Nowy efekt – napis na środku po aktywacji power-upa
+        let powerupMessage = null;
+        let powerupMessageTimer = 0;
+
+        // Entities
+        const cow = {
+            x: 100,
+            y: COW_GROUND,
+            vy: 0,
+            width: 45,
+            height: 55,
+            jumping: false
+        };
+
+        let bombs = [];
+        let springParts = [];
+        let jetParts = [];
+        let clouds = [];
+        let particles = [];
+        let mountains = [];
+        let trees = [];
+        let bushes = [];
+        let sun = { x: 150, y: 70, radius: 35 };
+
+        // Input
+        const keys = {};
+        document.addEventListener('keydown', (e) => { 
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (gameOver) restartGame();
+                else jump();
+            }
+            keys[e.code] = true; 
+        });
+        document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = WIDTH / rect.width;
+            const scaleY = HEIGHT / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            if (x >= cow.x && x <= cow.x + cow.width &&
+                y >= cow.y && y <= cow.y + cow.height && !gameOver) {
+                jump();
+            }
+        });
+
+        function resizeCanvas() {
+            const maxW = Math.min(window.innerWidth * 0.95, 800);
+            const maxH = Math.min((window.innerHeight - 150) * 0.9, 400);
+            const scale = Math.min(maxW / WIDTH, maxH / HEIGHT);
+            canvas.style.width = (WIDTH * scale) + 'px';
+            canvas.style.height = (HEIGHT * scale) + 'px';
+            gameContainer.style.width = canvas.style.width;
+            gameContainer.style.height = canvas.style.height;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        function initBackgrounds() {
+            clouds = [
+                {x: 100, y: 50, size: 60}, {x: 400, y: 80, size: 80}, {x: 700, y: 60, size: 50},
+                {x: 200, y: 30, size: 70}, {x: 550, y: 40, size: 65}, {x: 50, y: 70, size: 55}
+            ];
+            mountains = [];
+            for (let i = 0; i < 4; i++) {
+                mountains.push({
+                    x: i * 450 + Math.random() * 100,
+                    baseWidth: 250 + Math.random() * 150,
+                    height: 110 + Math.random() * 70
+                });
+            }
+            trees = [];
+            for (let i = 0; i < 10; i++) {
+                trees.push({
+                    x: i * 140 + Math.random() * 80,
+                    height: 85 + Math.random() * 45,
+                    trunkWidth: 12 + Math.random() * 6
+                });
+            }
+            bushes = [];
+            for (let i = 0; i < 15; i++) {
+                bushes.push({
+                    x: i * 85 + Math.random() * 60,
+                    size: 22 + Math.random() * 18
+                });
+            }
+            sun.x = 150 + Math.random() * 100;
+            sun.y = 60 + Math.random() * 20;
+        }
+
+        function jump() {
+            if (!cow.jumping && cow.y >= COW_GROUND - 5) {
+                const boost = springBoostActive ? -25 : -19;
+                cow.vy = boost;
+                cow.jumping = true;
+            }
+        }
+
+        function activateSpringBoost() {
+            springBoostActive = true;
+            springTimer = 15 * FPS;
+            springCount = 0;
+            showPowerupMessage("SUPER SPRĘŻYNA!");
+        }
+
+        function activateJetpack() {
+            jetpackActive = true;
+            jetTimer = 10 * FPS;
+            jetCount = 0;
+            showPowerupMessage("JETPACK AKTYWNY!");
+        }
+
+        function showPowerupMessage(text) {
+            powerupMessage = text;
+            powerupMessageTimer = 150; // ~2.5 sekundy przy 60 fps
+        }
+
+        function checkHighScore() {
+            if (score > highScore) {
+                newRecord = true;
+                highScore = score;
+                localStorage.setItem('cowHighScore', highScore);
+            } else {
+                newRecord = false;
+            }
+        }
+
+        function update() {
+            if (gameOver) return;
+
+            // Timery power-upów
+            if (springBoostActive) {
+                springTimer--;
+                if (springTimer <= 0) springBoostActive = false;
+            }
+            if (jetpackActive) {
+                jetTimer--;
+                cow.y = Math.max(170, cow.y - 0.5);
+                if (jetTimer <= 0) {
+                    jetpackActive = false;
+                    jetImmunity = 2;
+                }
+            } else if (jetImmunity > 0) {
+                jetImmunity--;
+            }
+
+            if (!jetpackActive) {
+                if (cow.jumping) {
+                    cow.vy += 1.0;
+                    cow.y += cow.vy;
+                    if (cow.y >= COW_GROUND) {
+                        cow.y = COW_GROUND;
+                        cow.jumping = false;
+                        cow.vy = 0;
+                    }
+                }
+            }
+
+            // Licznik napisu
+            if (powerupMessageTimer > 0) {
+                powerupMessageTimer--;
+                if (powerupMessageTimer <= 0) powerupMessage = null;
+            }
+
+            // Move objects
+            for (let i = bombs.length - 1; i >= 0; i--) {
+                bombs[i].x -= gameSpeed;
+                bombs[i].fuse -= 0.1;
+                if (bombs[i].x < -50) {
+                    bombs.splice(i, 1);
+                    score++;
+                }
+            }
+
+            for (let i = springParts.length - 1; i >= 0; i--) {
+                springParts[i].x -= gameSpeed;
+                springParts[i].rot += 0.04;
+                if (springParts[i].x < -30) springParts.splice(i, 1);
+            }
+            for (let i = jetParts.length - 1; i >= 0; i--) {
+                jetParts[i].x -= gameSpeed;
+                jetParts[i].rot += 0.03;
+                if (jetParts[i].x < -30) jetParts.splice(i, 1);
+            }
+
+            // Spawn bombs
+            const spawnChanceBomb = 0.0045 + (score / 25000) + (gameSpeed / 20000);
+            const minDistBomb = 240 + Math.random() * 90;
+            let lastBombX = bombs.length ? bombs[bombs.length - 1].x : WIDTH + 100;
+            if (Math.random() < spawnChanceBomb && lastBombX > minDistBomb && bombs.length < 3) {
+                bombs.push({
+                    x: WIDTH + 30,
+                    y: BOMB_BASE_Y - (Math.random() * 28),
+                    width: 28,
+                    height: 42,
+                    fuse: 1
+                });
+            }
+
+            // Spawn parts ONLY on ground level
+            const spawnChancePart = 0.0018 + (score / 40000);
+            const minDistPart = 320 + Math.random() * 180;
+            let lastPartX = Math.min(
+                springParts.length ? springParts[springParts.length-1]?.x || WIDTH : WIDTH,
+                jetParts.length ? jetParts[jetParts.length-1]?.x || WIDTH : WIDTH,
+                lastBombX
+            );
+
+            if (Math.random() < spawnChancePart && springParts.length < 3 && springCount < 4 && lastPartX > minDistPart) {
+                springParts.push({
+                    x: WIDTH + 40,
+                    y: COW_GROUND + 8,
+                    width: 24,
+                    height: 24,
+                    rot: 0,
+                    pulse: Math.random() * Math.PI * 2
+                });
+            }
+
+            if (Math.random() < spawnChancePart * 0.75 && jetParts.length < 3 && jetCount < 4 && lastPartX > minDistPart * 1.1) {
+                jetParts.push({
+                    x: WIDTH + 40,
+                    y: COW_GROUND + 10,
+                    width: 26,
+                    height: 26,
+                    rot: 0,
+                    pulse: Math.random() * Math.PI * 2
+                });
+            }
+
+            // Collect spring
+            for (let i = springParts.length - 1; i >= 0; i--) {
+                const p = springParts[i];
+                if (cow.x < p.x + p.width && cow.x + cow.width > p.x &&
+                    cow.y < p.y + p.height && cow.y + cow.height > p.y) {
+                    springParts.splice(i, 1);
+                    springCount = Math.min(4, springCount + 1);
+                    if (springCount >= 4) activateSpringBoost();
+                    for (let k = 0; k < 14; k++) {
+                        particles.push({
+                            x: p.x + 12, y: p.y + 12,
+                            vx: (Math.random()-0.5)*14, vy: (Math.random()-0.5)*14 - 4,
+                            life:1.2, size:3, color:'lime'
+                        });
+                    }
+                }
+            }
+
+            // Collect jet
+            for (let i = jetParts.length - 1; i >= 0; i--) {
+                const p = jetParts[i];
+                if (cow.x < p.x + p.width && cow.x + cow.width > p.x &&
+                    cow.y < p.y + p.height && cow.y + cow.height > p.y) {
+                    jetParts.splice(i, 1);
+                    jetCount = Math.min(4, jetCount + 1);
+                    if (jetCount >= 4) activateJetpack();
+                    for (let k = 0; k < 14; k++) {
+                        particles.push({
+                            x: p.x + 13, y: p.y + 13,
+                            vx: (Math.random()-0.5)*14, vy: (Math.random()-0.5)*14 - 4,
+                            life:1.2, size:3, color:'cyan'
+                        });
+                    }
+                }
+            }
+
+            // Bomb collision
+            for (let i = bombs.length - 1; i >= 0; i--) {
+                const bomb = bombs[i];
+                if (cow.x < bomb.x + bomb.width &&
+                    cow.x + cow.width > bomb.x &&
+                    cow.y < bomb.y + bomb.height &&
+                    cow.y + cow.height > bomb.y) {
+                    if (jetpackActive || jetImmunity > 0) {
+                        bombs.splice(i, 1);
+                        score += 3;
+                        if (jetImmunity > 0) jetImmunity--;
+                    } else {
+                        gameOver = true;
+                        checkHighScore();
+                        explode();
+                        return;
+                    }
+                }
+            }
+
+            frame++;
+            gameSpeed += 0.0008;
+            if (gameSpeed > 19) gameSpeed = 19;
+
+            // Parallax
+            sun.x -= gameSpeed * 0.04;
+            if (sun.x < -100) sun.x = WIDTH + 100;
+            clouds.forEach(c => { c.x -= gameSpeed * 0.15; if (c.x < -100) c.x = WIDTH + 100; });
+            mountains.forEach(m => { m.x -= gameSpeed * 0.08; if (m.x < -m.baseWidth) m.x += 1600; });
+            trees.forEach(t => { t.x -= gameSpeed * 0.28; if (t.x < -100) t.x += 1400; });
+            bushes.forEach(b => { b.x -= gameSpeed * 0.55; if (b.x < -60) b.x += 1300; });
+        }
+
+        function explode() {
+            for (let i = 0; i < 80; i++) {
+                particles.push({
+                    x: cow.x + 22, y: cow.y + 27,
+                    vx: (Math.random() - 0.5) * 28,
+                    vy: (Math.random() - 0.5) * 28,
+                    life: 1,
+                    size: Math.random() * 7 + 2,
+                    color: undefined
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.45;
+                p.life -= 0.028;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function drawSun() {
+            const grad = ctx.createRadialGradient(sun.x, sun.y, 0, sun.x, sun.y, sun.radius * 1.5);
+            grad.addColorStop(0, '#FFF200');
+            grad.addColorStop(0.5, '#FFD700');
+            grad.addColorStop(1, '#FF8C00');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(sun.x, sun.y, sun.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowColor = '#FFD700';
+            ctx.shadowBlur = 20;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawClouds() {
+            ctx.fillStyle = 'rgba(255,255,255,0.95)';
+            ctx.shadowColor = 'rgba(255,255,255,0.6)';
+            ctx.shadowBlur = 15;
+            clouds.forEach(c => {
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, c.size * 0.3, 0, Math.PI * 2);
+                ctx.arc(c.x + c.size * 0.3, c.y, c.size * 0.45, 0, Math.PI * 2);
+                ctx.arc(c.x + c.size * 0.65, c.y, c.size * 0.4, 0, Math.PI * 2);
+                ctx.arc(c.x + c.size * 0.15, c.y + c.size * 0.2, c.size * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.shadowBlur = 0;
+        }
+
+        function drawMountains() {
+            const grad = ctx.createLinearGradient(0, 260, 0, HEIGHT);
+            grad.addColorStop(0, '#556B2F');
+            grad.addColorStop(0.5, '#6B8E23');
+            grad.addColorStop(1, '#228B22');
+            ctx.fillStyle = grad;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 10;
+            mountains.forEach(m => {
+                ctx.save();
+                ctx.translate(m.x + m.baseWidth / 2, HEIGHT);
+                ctx.beginPath();
+                ctx.moveTo(-m.baseWidth / 2, 0);
+                ctx.lineTo(0, -m.height);
+                ctx.lineTo(m.baseWidth / 2, 0);
+                ctx.fill();
+                ctx.restore();
+            });
+            ctx.shadowBlur = 0;
+        }
+
+        function drawTrees() {
+            trees.forEach(t => {
+                ctx.fillStyle = '#8B4513';
+                ctx.shadowColor = 'rgba(0,0,0,0.4)';
+                ctx.shadowBlur = 8;
+                ctx.fillRect(t.x - t.trunkWidth / 2, HEIGHT - t.height - 35, t.trunkWidth, 35);
+                ctx.fillStyle = '#228B22';
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(t.x, HEIGHT - t.height - 40, t.height * 0.65, 0, Math.PI * 2);
+                ctx.arc(t.x - 22, HEIGHT - t.height - 28, t.height * 0.45, 0, Math.PI * 2);
+                ctx.arc(t.x + 22, HEIGHT - t.height - 28, t.height * 0.45, 0, Math.PI * 2);
+                ctx.arc(t.x + 8, HEIGHT - t.height - 50, t.height * 0.35, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+        }
+
+        function drawBushes() {
+            bushes.forEach(b => {
+                ctx.fillStyle = '#32CD32';
+                ctx.shadowColor = 'rgba(0,0,0,0.4)';
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(b.x, HEIGHT - 28, b.size, 0, Math.PI * 2);
+                ctx.arc(b.x - 12, HEIGHT - 32, b.size * 0.75, 0, Math.PI * 2);
+                ctx.arc(b.x + 12, HEIGHT - 32, b.size * 0.75, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+        }
+
+        function drawGround() {
+            const grad = ctx.createLinearGradient(0, GROUND_Y, 0, HEIGHT);
+            grad.addColorStop(0, '#A8E6CF');
+            grad.addColorStop(1, '#228B22');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y);
+
+            ctx.strokeStyle = '#FFF';
+            ctx.lineWidth = 7;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = 'rgba(255,255,255,0.5)';
+            ctx.shadowBlur = 5;
+            for (let i = 0; i < 1400; i += 75) {
+                const dashX = ((i - (frame * gameSpeed * 0.35) % 75) + WIDTH) % WIDTH;
+                ctx.beginPath();
+                ctx.moveTo(dashX, GROUND_Y - 18);
+                ctx.lineTo(dashX + 45, GROUND_Y - 18);
+                ctx.stroke();
+            }
+            ctx.shadowBlur = 0;
+        }
+
+        function drawCow() {
+            const legOffset = Math.sin(frame * 0.45) * 11;
+            const tailOffset = Math.sin(frame * 0.65) * 4;
+            const earOffset = Math.sin(frame * 0.35) * 2.5;
+
+            ctx.shadowColor = 'rgba(0,0,0,0.4)';
+            ctx.shadowBlur = 8;
+
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(cow.x + 5, cow.y + 5, 35, 42);
+
+            ctx.fillStyle = '#F5F5F5';
+            ctx.shadowBlur = 0;
+            ctx.beginPath();
+            ctx.arc(cow.x + 27, cow.y + 15 + earOffset, 19, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 8;
+
+            ctx.fillStyle = '#DAA520';
+            ctx.beginPath();
+            ctx.moveTo(cow.x + 20, cow.y + 4);
+            ctx.lineTo(cow.x + 11, cow.y - 10);
+            ctx.lineTo(cow.x + 21, cow.y - 3);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(cow.x + 34, cow.y + 4);
+            ctx.lineTo(cow.x + 43, cow.y - 10);
+            ctx.lineTo(cow.x + 33, cow.y - 3);
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(cow.x + 20, cow.y + 12, 3.5, 0, Math.PI * 2);
+            ctx.arc(cow.x + 34, cow.y + 12, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#FFB6C1';
+            ctx.beginPath();
+            ctx.arc(cow.x + 27, cow.y + 23, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#8B4513';
+            ctx.lineWidth = 5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(cow.x + 5, cow.y + 26);
+            ctx.lineTo(cow.x - 8 + tailOffset, cow.y + 26 + tailOffset * 2.5);
+            ctx.stroke();
+
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 12;
+            ctx.lineCap = 'round';
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.moveTo(cow.x + 12, cow.y + 46);
+            ctx.lineTo(cow.x + 12 + legOffset * 0.6, cow.y + 57 + legOffset);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(cow.x + 33, cow.y + 46);
+            ctx.lineTo(cow.x + 33 - legOffset * 0.6, cow.y + 57 - legOffset);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            if (jetpackActive) {
+                ctx.fillStyle = 'rgba(255,140,0,0.7)';
+                ctx.beginPath();
+                ctx.ellipse(cow.x + 22, cow.y + 55, 12, 25 + Math.sin(frame*0.8)*8, 0, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,0,0.9)';
+                ctx.beginPath();
+                ctx.ellipse(cow.x + 22, cow.y + 55, 6, 18 + Math.sin(frame*1.2)*6, 0, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+
+        function drawBomb(bomb) {
+            ctx.shadowColor = 'rgba(0,0,0,0.6)';
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = '#4D4D4D';
+            ctx.beginPath();
+            ctx.ellipse(bomb.x + 14, bomb.y + 26, 14, 21, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            const fuseLen = 28 + Math.sin(frame * 0.6 + bomb.fuse * 12) * 4;
+            ctx.strokeStyle = `hsl(25, 100%, ${55 + Math.sin(frame * 0.35) * 25}%)`;
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(bomb.x + 14, bomb.y);
+            ctx.lineTo(bomb.x + 14, bomb.y - fuseLen);
+            ctx.stroke();
+
+            ctx.fillStyle = '#FFD700';
+            ctx.shadowColor = '#FFD700';
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.arc(bomb.x + 14, bomb.y - fuseLen, 7 + Math.sin(frame * 0.5) * 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(bomb.x + 8, bomb.y + 11, 5, 5);
+            ctx.fillRect(bomb.x + 17, bomb.y + 26, 5, 5);
+        }
+
+        function drawQuarterCircleProgress(x, y, radius, count, color, active, timer) {
+            const centerX = x + radius;
+            const centerY = y + radius;
+            const fullAngle = Math.PI * 2;
+            const segmentAngle = fullAngle / 4;
+
+            // Background circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius + 4, 0, fullAngle);
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fill();
+
+            // Outline
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius + 4, 0, fullAngle);
+            ctx.stroke();
+
+            // Filled segments
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.arc(centerX, centerY, radius, i * segmentAngle - Math.PI/2, (i+1) * segmentAngle - Math.PI/2);
+                ctx.closePath();
+
+                if (i < count) {
+                    const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+                    grad.addColorStop(0, color);
+                    grad.addColorStop(1, '#111');
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = 'rgba(80,80,80,0.4)';
+                    ctx.fill();
+                }
+
+                // Segment border
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // Center icon/text
+            ctx.fillStyle = color;
+            ctx.font = 'bold 18px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(count + '/4', centerX, centerY);
+
+            if (active) {
+                const sec = Math.ceil(timer / FPS);
+                ctx.fillStyle = sec > 5 ? '#FFFF00' : '#FF4444';
+                ctx.font = 'bold 14px Arial';
+                ctx.fillText(sec + 's', centerX, centerY + 22);
+            }
+        }
+
+        function drawSpringPart(p) {
+            const glow = Math.sin(frame * 0.14 + p.pulse) * 10 + 14;
+            ctx.save();
+            ctx.translate(p.x + 12, p.y + 12);
+            ctx.rotate(p.rot);
+            ctx.shadowColor = 'lime';
+            ctx.shadowBlur = glow;
+
+            ctx.fillStyle = 'rgba(0,255,0,0.92)';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 12, 7, 0, 0, Math.PI*2);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 5.5, 0, Math.PI*2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawJetPart(p) {
+            const glow = Math.sin(frame * 0.16 + p.pulse + 1.5) * 12 + 16;
+            ctx.save();
+            ctx.translate(p.x + 13, p.y + 13);
+            ctx.rotate(p.rot);
+            ctx.shadowColor = 'cyan';
+            ctx.shadowBlur = glow;
+
+            ctx.fillStyle = 'rgba(0,220,255,0.92)';
+            ctx.roundRect(-13, -13, 26, 26, 8);
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 7, 0, Math.PI*2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color || '#FF4500';
+                ctx.shadowColor = p.color || '#FF4500';
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawPowerupMessage() {
+            if (!powerupMessage || powerupMessageTimer <= 0) return;
+
+            const alpha = Math.min(1, powerupMessageTimer / 60);
+            const scale = 1 + Math.sin(frame * 0.3) * 0.08;
+
+            ctx.save();
+            ctx.globalAlpha = alpha * 0.9;
+            ctx.shadowColor = powerupMessage.includes("SPRĘŻYNA") ? 'lime' : 'cyan';
+            ctx.shadowBlur = 25 + Math.sin(frame * 0.4) * 10;
+
+            ctx.font = `bold ${Math.floor(60 * scale)}px "Press Start 2P"`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = powerupMessage.includes("SPRĘŻYNA") ? '#00ff00' : '#00ffff';
+
+            ctx.fillText(powerupMessage, WIDTH / 2, HEIGHT / 2);
+
+            ctx.restore();
+        }
+
+        function drawUI() {
+            // Main score
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(15, 15, 240, 70);
+            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(15, 15, 240, 70);
+
+            ctx.fillStyle = '#FFF';
+            ctx.font = 'bold 20px "Press Start 2P"';
+            ctx.fillText(`Punkty: ${score}`, 30, 45);
+            ctx.fillText(`Rekord: ${highScore}`, 30, 70);
+
+            // Progress circles - right top
+            drawQuarterCircleProgress(WIDTH - 220, 20, 38, springCount, 'lime', springBoostActive, springTimer);
+            drawQuarterCircleProgress(WIDTH - 110, 20, 38, jetCount, 'cyan', jetpackActive || jetImmunity > 0, jetTimer);
+
+            // Labels
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 13px "Press Start 2P"';
+            ctx.textAlign = 'center';
+            ctx.fillText('SPRĘŻYNA', WIDTH - 182, 105);
+            ctx.fillText('JETPACK', WIDTH - 72, 105);
+
+            ctx.textAlign = 'left';
+            ctx.font = '14px "Press Start 2P"';
+            ctx.fillStyle = '#FF6B35';
+            ctx.fillText(`Prędkość: ${Math.floor(gameSpeed)}`, 30, 105);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+            drawSun();
+            drawClouds();
+            drawMountains();
+            drawTrees();
+            drawBushes();
+            drawGround();
+
+            springParts.forEach(drawSpringPart);
+            jetParts.forEach(drawJetPart);
+            drawCow();
+            bombs.forEach(drawBomb);
+            drawParticles();
+            drawPowerupMessage();   // ← nowy napis na środku
+            drawUI();
+
+            if (gameOver) {
+                overlay.style.display = 'flex';
+                document.getElementById('scoreText').textContent = `Wynik: ${score}`;
+                document.getElementById('highScoreText').textContent = newRecord ? '🌟 NOWY REKORD! 🌟' : `Rekord: ${highScore}`;
+            } else {
+                overlay.style.display = 'none';
+            }
+        }
+
+        function restartGame() {
+            bombs = [];
+            springParts = [];
+            jetParts = [];
+            particles = [];
+            score = 0;
+            springCount = 0;
+            jetCount = 0;
+            springBoostActive = false;
+            jetpackActive = false;
+            jetImmunity = 0;
+            powerupMessage = null;
+            powerupMessageTimer = 0;
+            frame = 0;
+            gameSpeed = 6;
+            gameOver = false;
+            newRecord = false;
+            cow.y = COW_GROUND;
+            cow.vy = 0;
+            cow.jumping = false;
+            initBackgrounds();
+            overlay.style.display = 'none';
+        }
+
+        initBackgrounds();
+
+        function loop() {
+            update();
+            updateParticles();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
