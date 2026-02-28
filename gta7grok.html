@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mini GTA Ultra</title>
+<style>
+body { margin:0; overflow:hidden; }
+#hud {
+  position:absolute;
+  top:10px;
+  left:10px;
+  color:white;
+  font-family:Arial;
+  background:rgba(0,0,0,0.6);
+  padding:10px;
+}
+#minimap {
+  position:absolute;
+  bottom:20px;
+  right:20px;
+  width:200px;
+  height:200px;
+  background:rgba(0,0,0,0.7);
+  border:2px solid white;
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+<b>LEGENDA:</b><br>
+WASD – ruch<br>
+SHIFT – sprint<br>
+E – wsiądź do najbliższego auta<br>
+LPM – strzelaj<br>
+Zabij wszystkich czerwonych 🔴
+</div>
+
+
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<canvas id="minimap"></canvas>
+<script>
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+
+let camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 3000);
+let renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Światło
+let light = new THREE.DirectionalLight(0xffffff,1);
+light.position.set(100,200,100);
+scene.add(light);
+
+// Obiekty
+let buildings = [], enemies = [], cars = [], bullets = [], civilians = [];
+let mapSize = 2000;
+
+// Ziemia
+let ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(mapSize,mapSize),
+  new THREE.MeshLambertMaterial({color:0x228B22})
+);
+ground.rotation.x=-Math.PI/2;
+scene.add(ground);
+
+// Drogi
+for(let i=-1000;i<=1000;i+=100){
+  let road=new THREE.Mesh(
+    new THREE.BoxGeometry(mapSize,1,20),
+    new THREE.MeshLambertMaterial({color:0x333333})
+  );
+  road.position.set(0,0.5,i);
+  scene.add(road);
+
+  let road2=road.clone();
+  road2.rotation.y=Math.PI/2;
+  road2.position.set(i,0.5,0);
+  scene.add(road2);
+}
+
+// Budynki
+for(let i=0;i<150;i++){
+  let h=Math.random()*60+20;
+  let b=new THREE.Mesh(
+    new THREE.BoxGeometry(40,h,40),
+    new THREE.MeshLambertMaterial({color:0x888888})
+  );
+  b.position.set(Math.floor(Math.random()*20-10)*100, h/2, Math.floor(Math.random()*20-10)*100);
+  scene.add(b);
+  buildings.push(b);
+}
+
+// Gracz
+let player=new THREE.Mesh(
+  new THREE.BoxGeometry(6,12,6),
+  new THREE.MeshLambertMaterial({color:0x00ff00})
+);
+player.position.y=6;
+scene.add(player);
+let currentCar = null;
+
+// Samochody
+for(let i=0;i<15;i++){
+  let car=new THREE.Mesh(
+    new THREE.BoxGeometry(14,6,8),
+    new THREE.MeshLambertMaterial({color:Math.random()*0xffffff})
+  );
+  car.position.set(Math.random()*800-400,4,Math.random()*800-400);
+  scene.add(car);
+  cars.push(car);
+}
+
+// Przeciwnicy
+function spawnEnemies(count){
+  for(let i=0;i<count;i++){
+    let e=new THREE.Mesh(
+      new THREE.BoxGeometry(6,12,6),
+      new THREE.MeshLambertMaterial({color:0xff0000})
+    );
+    e.position.set(Math.random()*800-400,6,Math.random()*800-400);
+    scene.add(e);
+    enemies.push(e);
+  }
+}
+spawnEnemies(12);
+
+// Cywile
+for(let i=0;i<15;i++){
+  let npc = new THREE.Mesh(
+    new THREE.BoxGeometry(6,12,6),
+    new THREE.MeshLambertMaterial({color:0xffffff})
+  );
+  npc.position.set(Math.random()*800-400,6,Math.random()*800-400);
+  scene.add(npc);
+  civilians.push(npc);
+}
+
+// Klawisze
+let keys={};
+document.addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+// HUD
+let playerHealth=100;
+let healthBarContainer=document.createElement("div");
+healthBarContainer.style.position="absolute";
+healthBarContainer.style.top="10px";
+healthBarContainer.style.left="50%";
+healthBarContainer.style.transform="translateX(-50%)";
+healthBarContainer.style.width="300px";
+healthBarContainer.style.height="25px";
+healthBarContainer.style.background="gray";
+healthBarContainer.style.border="2px solid white";
+document.body.appendChild(healthBarContainer);
+
+let healthBar=document.createElement("div");
+healthBar.style.width=playerHealth+"%";
+healthBar.style.height="100%";
+healthBar.style.background="lime";
+healthBarContainer.appendChild(healthBar);
+
+// Ammo HUD
+let ammo=15;
+let reloading=false;
+let ammoDiv=document.createElement("div");
+ammoDiv.style.position="absolute";
+ammoDiv.style.bottom="10px";
+ammoDiv.style.right="10px";
+ammoDiv.style.color="white";
+ammoDiv.style.fontFamily="Arial";
+ammoDiv.style.fontSize="24px";
+document.body.appendChild(ammoDiv);
+
+// Cywile HUD
+let maxCivilianKillsPerLevel=100;
+let civilianKills=0;
+let civilianHUD=document.createElement("div");
+civilianHUD.style.position="absolute";
+civilianHUD.style.top="40px";
+civilianHUD.style.left="50%";
+civilianHUD.style.transform="translateX(-50%)";
+civilianHUD.style.color="white";
+civilianHUD.style.fontFamily="Arial";
+civilianHUD.style.fontSize="20px";
+document.body.appendChild(civilianHUD);
+
+// Okienko cywili
+let civilianWindow=document.createElement("div");
+civilianWindow.style.position="absolute";
+civilianWindow.style.top="60px";
+civilianWindow.style.left="50%";
+civilianWindow.style.transform="translateX(-50%)";
+civilianWindow.style.background="rgba(0,0,0,0.8)";
+civilianWindow.style.color="red";
+civilianWindow.style.padding="15px 25px";
+civilianWindow.style.fontFamily="Arial";
+civilianWindow.style.fontSize="20px";
+civilianWindow.style.border="2px solid white";
+civilianWindow.style.display="none";
+civilianWindow.innerText="Przekroczyłeś limit cywilów!";
+document.body.appendChild(civilianWindow);
+
+// Game Over
+let gameOverDiv=document.createElement("div");
+gameOverDiv.style.position="absolute";
+gameOverDiv.style.top="50%";
+gameOverDiv.style.left="50%";
+gameOverDiv.style.transform="translate(-50%, -50%)";
+gameOverDiv.style.background="rgba(0,0,0,0.9)";
+gameOverDiv.style.color="red";
+gameOverDiv.style.padding="40px";
+gameOverDiv.style.fontSize="40px";
+gameOverDiv.style.fontFamily="Arial";
+gameOverDiv.style.textAlign="center";
+gameOverDiv.style.display="none";
+gameOverDiv.innerHTML="GAME OVER<br><br>";
+
+let resetBtn=document.createElement("button");
+resetBtn.innerText="RESET";
+resetBtn.style.fontSize="20px";
+resetBtn.onclick=()=>location.reload();
+gameOverDiv.appendChild(resetBtn);
+document.body.appendChild(gameOverDiv);
+
+// --------------------------
+// MINI MAPKA POPRAWIONA
+// --------------------------
+let map=document.getElementById("minimap");
+map.width=200;
+map.height=200;
+map.style.position="absolute";
+map.style.left="10px";
+map.style.bottom="50px";
+map.style.border="2px solid white";
+map.style.background="rgba(0,0,0,0.5)";
+let ctx=map.getContext("2d");
+
+function updateMinimap(){
+  ctx.clearRect(0,0,200,200);
+  let scale = 200/mapSize;
+
+  function drawDot(obj, color){
+    let x = (obj.position.x + mapSize/2)*scale;
+    let y = (obj.position.z + mapSize/2)*scale;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x,y,4,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  drawDot(player,"lime");
+  cars.forEach(c => drawDot(c,"blue"));
+  enemies.forEach(e => drawDot(e,"red"));
+  civilians.forEach(c => drawDot(c,"white"));
+}
+
+// Level system
+let level=1;
+let levelUI=document.createElement("div");
+levelUI.style.position="absolute";
+levelUI.style.top="50%";
+levelUI.style.left="50%";
+levelUI.style.transform="translate(-50%,-50%)";
+levelUI.style.background="rgba(0,0,0,0.9)";
+levelUI.style.color="white";
+levelUI.style.padding="40px";
+levelUI.style.fontSize="28px";
+levelUI.style.fontFamily="Arial";
+levelUI.style.textAlign="center";
+levelUI.style.display="none";
+document.body.appendChild(levelUI);
+
+function clearEnemies(){enemies.forEach(e=>scene.remove(e)); enemies.length=0;}
+function spawnEnemies(count){for(let i=0;i<count;i++){let e=new THREE.Mesh(new THREE.BoxGeometry(6,12,6),new THREE.MeshLambertMaterial({color:0xff0000})); e.position.set(Math.random()*800-400,6,Math.random()*800-400); scene.add(e); enemies.push(e);}}
+function nextLevel(){level++; levelUI.style.display="none"; clearEnemies(); spawnEnemies(10+level*15);}
+function restartLevel(){levelUI.style.display="none"; clearEnemies(); spawnEnemies(10+level*5);}
+function showLevelScreen(){levelUI.innerHTML=""; let title=document.createElement("div"); title.innerHTML="LEVEL "+level+" COMPLETE<br><br>"; levelUI.appendChild(title); let nextBtn=document.createElement("button"); nextBtn.innerText="NEXT LEVEL"; nextBtn.style.fontSize="20px"; nextBtn.onclick=nextLevel; levelUI.appendChild(nextBtn); levelUI.appendChild(document.createElement("br")); levelUI.appendChild(document.createElement("br")); let restartBtn=document.createElement("button"); restartBtn.innerText="RESTART LEVEL"; restartBtn.style.fontSize="20px"; restartBtn.onclick=restartLevel; levelUI.appendChild(restartBtn); levelUI.style.display="block";}
+
+// Strzały
+document.addEventListener("click",()=>{
+  if(!reloading && ammo>0){
+    let bullet=new THREE.Mesh(new THREE.SphereGeometry(2,8,8), new THREE.MeshBasicMaterial({color:0xffffff}));
+    bullet.position.copy(player.position);
+    bullet.velocity=new THREE.Vector3(0,0,-5);
+    bullets.push(bullet);
+    scene.add(bullet);
+    ammo--;
+    if(ammo===0){
+      reloading=true;
+      setTimeout(()=>{ ammo=15; reloading=false; },3000);
+    }
+  }
+});
+
+// Update
+let lastPlayerPos=player.position.clone();
+let standStillTime=0;
+function update(){
+function clampPosition(obj){
+    let limit = mapSize/2 - 5; // granica mapy minus mały margines
+    obj.position.x = Math.max(-limit, Math.min(limit, obj.position.x));
+    obj.position.z = Math.max(-limit, Math.min(limit, obj.position.z));
+}
+  
+// Gracz
+let speed=keys["shift"]?2:1; 
+if(currentCar) speed=3;
+if(keys["w"]) player.position.z-=speed;
+if(keys["s"]) player.position.z+=speed;
+if(keys["a"]) player.position.x-=speed;
+if(keys["d"]) player.position.x+=speed;
+
+// Wsiadanie/Wysiadanie
+if(keys["e"]){
+    if(currentCar){currentCar=null;} 
+    else {
+        let nearest=null; 
+        let minDist=30; 
+        cars.forEach(c=>{
+            let d=player.position.distanceTo(c.position); 
+            if(d<minDist){minDist=d; nearest=c;}
+        }); 
+        if(nearest) currentCar=nearest;
+    }
+    keys["e"]=false;
+}
+if(currentCar){currentCar.position.copy(player.position);}
+// Ograniczamy gracza w granicach mapy
+clampPosition(player);
+
+// Jeśli gracz jest w samochodzie, również ograniczamy jego pozycję
+if(currentCar){
+    currentCar.position.copy(player.position);
+    clampPosition(currentCar);
+}
+  // Ruch przeciwników
+  enemies.forEach(e=>{
+    let dist=e.position.distanceTo(player.position);
+    if(dist<300){ let dir=new THREE.Vector3().subVectors(player.position,e.position).normalize(); e.position.add(dir.multiplyScalar(0.7));}
+    if(dist<15){ playerHealth-=0.5;}
+  });
+
+  // Ruch cywilów
+  civilians.forEach(n=>{n.position.x+=Math.sin(Date.now()*0.002)*0.3;});
+
+  // Strzały
+bullets.forEach((b,i)=>{
+    b.position.add(b.velocity); // poruszamy kulą
+
+    let hit = false;
+
+    // Sprawdzenie trafienia wrogów
+    enemies.forEach((e,ei)=>{
+        if(b.position.distanceTo(e.position)<10){
+            scene.remove(e);
+            enemies.splice(ei,1);
+            hit = true;
+        }
+    });
+
+    // Sprawdzenie trafienia cywili
+    civilians.forEach((c,ci)=>{
+        if(b.position.distanceTo(c.position)<10){
+            scene.remove(c);
+            civilians.splice(ci,1);
+            civilianKills++;
+            hit = true;
+            if(civilianKills > maxCivilianKillsPerLevel){
+                civilianWindow.style.display="block";
+                setTimeout(()=>{
+                    civilianWindow.style.display="none";
+                    restartLevel();
+                    civilianKills=0;
+                    function restartLevel(){
+                      levelUI.style.display="none";
+                      clearEnemies();
+                      pawnEnemies(10 + level*5);
+                      resetCivilians(); // <-- dodane
+                    }
+                },2000);
+            }
+        }
+    });
+
+    if(hit){
+        // Usuwamy kulę po trafieniu
+        scene.remove(b);
+        bullets.splice(i,1);
+    } else if(b.position.length()>3000){
+        // Usuwamy kulę jeśli za daleko
+        scene.remove(b);
+        bullets.splice(i,1);
+    }
+});
+  // Regeneracja życia
+  if(player.position.distanceTo(lastPlayerPos)<0.5){standStillTime+=1/60; if(standStillTime>5) playerHealth=Math.min(playerHealth+0.3,100);}
+  else{standStillTime=0;}
+  lastPlayerPos.copy(player.position);
+
+  // Update HUD
+  healthBar.style.width=Math.max(playerHealth,0)+"%";
+  ammoDiv.innerText=reloading?"RELOADING...":"AMMO: "+ammo;
+  civilianHUD.innerText=`Maksymalna liczba trafionych cywili: ${civilianKills}/${maxCivilianKillsPerLevel}`;
+
+  // Game Over
+  if(playerHealth<=0){gameOverDiv.style.display="block";}
+
+  // Kamera
+  camera.position.set(player.position.x,player.position.y+50,player.position.z+80);
+  camera.lookAt(player.position);
+
+  // Minimap
+  updateMinimap();
+
+  // NEXT LEVEL
+  if(enemies.length===0 && levelUI.style.display==="none"){showLevelScreen();}
+}
+
+function animate(){requestAnimationFrame(animate); update(); renderer.render(scene,camera);}
+animate();
+// ---------------------------
+// GAME OVER + RESTART LEVELU
+// ---------------------------
+function gameOver() {
+  gameOverDiv.style.display = "block";
+}
+
+// Funkcja restartu poziomu po śmierci
+function restartCurrentLevel(){
+  gameOverDiv.style.display="none";
+  resetCivilians();
+
+  // Reset gracza
+  player.position.set(0,6,0);
+  playerHealth = 100;
+
+  // Reset wrogów i spawn
+  clearEnemies();
+  spawnEnemies(10 + level*5);
+
+  // Reset cywili
+  civilianKills = 0;
+  civilians.forEach(c => scene.remove(c));
+  civilians.length = 0;
+
+  for(let i=0;i<15;i++){
+    let npc = new THREE.Mesh(
+      new THREE.BoxGeometry(6,12,6),
+      new THREE.MeshLambertMaterial({color:0xffffff})
+    );
+    npc.position.set(Math.random()*800-400,6,Math.random()*800-400);
+    scene.add(npc);
+    civilians.push(npc);
+  }
+
+  // Reset ammo i reload
+  ammo = 15;
+  reloading = false;
+}
+
+// Podpięcie przycisku RESET w GAME OVER
+resetBtn.onclick = restartCurrentLevel;
+civilians.forEach((c, idx) => {
+  bullets.forEach(b => {
+    if(b.position.distanceTo(c.position) < 10) {  // trafienie cywila
+      scene.remove(c);               // usuwamy z mapy
+      civilians.splice(idx, 1);      // usuwamy z tablicy
+      civilianKills++;               // zwiększamy licznik
+
+      if(civilianKills > maxCivilianKillsPerLevel){
+        // Przekroczono limit cywilów → restart aktualnego levelu
+        civilianWindow.style.display = "block";
+        setTimeout(() => {
+          civilianWindow.style.display = "none";
+          restartLevel();
+        }, 2000);
+      }
+    }
+  });
+});
+
+// Aktualizacja HUD cywilów
+civilianHUD.innerText = `Cywile: ${civilianKills}/${maxCivilianKillsPerLevel}`;
+function resetCivilians() {
+    // Usuwamy stare cywile
+    civilians.forEach(c => scene.remove(c));
+    civilians.length = 0;
+
+    // Reset licznika zabitych cywilów
+    civilianKills = 0;
+
+    // Tworzymy nowych cywilów
+    for(let i = 0; i < 15; i++){
+        let npc = new THREE.Mesh(
+            new THREE.BoxGeometry(6,12,6),
+            new THREE.MeshLambertMaterial({color:0xffffff})
+        );
+        npc.position.set(Math.random()*800-400, 6, Math.random()*800-400);
+        scene.add(npc);
+        civilians.push(npc);
+    }
+
+    // Aktualizacja HUD
+    civilianHUD.innerText = `Cywile: ${civilianKills}/${maxCivilianKillsPerLevel}`;
+}
+</script>
+</body>
+</html>
